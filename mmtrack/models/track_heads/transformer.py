@@ -12,6 +12,8 @@ from torch import Tensor, nn
 import math
 from typing import Tuple, Type
 
+from mmtrack.registry import MODELS
+
 class MLPBlock(nn.Module):
     def __init__(
         self,
@@ -27,6 +29,7 @@ class MLPBlock(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.lin2(self.act(self.lin1(x)))
 
+@MODELS.register_module()
 class TwoWayTransformer(nn.Module):
     def __init__(
         self,
@@ -78,6 +81,7 @@ class TwoWayTransformer(nn.Module):
         image_embedding: Tensor,
         image_pe: Tensor,
         prompt_embedding: Tensor,
+        prompt_pe: Tensor,
     ) -> Tuple[Tensor, Tensor]:
         """
         Args:
@@ -87,6 +91,7 @@ class TwoWayTransformer(nn.Module):
             have the same shape as image_embedding.
           prompt_embedding (torch.Tensor): the embedding to add to the query points.
             Must have shape B x (1 + L_text + HxW) x embedding_dim 
+          prompt_pe (torch.Tensor): the positional encoding to add to the prompt_embedding.
 
         Returns:
           torch.Tensor: the processed point_embedding
@@ -106,12 +111,12 @@ class TwoWayTransformer(nn.Module):
             queries, keys = layer(
                 queries=queries,
                 keys=keys,
-                query_pe=prompt_embedding,
+                query_pe=prompt_pe,
                 key_pe=image_pe,
             )
 
         # Apply the final attention layer from the points to the image
-        q = queries + prompt_embedding
+        q = queries + prompt_pe
         k = keys + image_pe
         attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys)
         queries = queries + attn_out
