@@ -14,16 +14,17 @@ model = dict(
         type='VLEncoder',
         vision_encoder=dict(
             type='VisionTransformer',
-            x_size=320,
-            patch_size=20,
+            x_size=288,
+            patch_size=18,
             width=384,
             layers=12,
             heads=6,
             mlp_ratio=4.0,
         ),
-        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
-    cls_head=dict(
-        type='MultiModalHead',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')
+    ),
+    head=dict(
+        type='MultiModelFusionHead',
         transformer=dict(
             type='TwoWayTransformer',
             depth=3,
@@ -31,57 +32,47 @@ model = dict(
             num_heads=8,
             mlp_dim=2048,
         ),
-        loss_cls=dict(type='KLGridLoss'),
-        train_cfg=dict(
-            feat_size=(18, 18),
-            img_size=(288, 288),
-            sigma_factor=0.05,
-            end_pad_if_even=True,
-            gauss_label_bias=0.,
-            use_gauss_density=True,
-            label_density_norm=True,
-            label_density_threshold=0.,
-            label_density_shrink=0,
-            loss_weights=dict(cls_init=0.25, cls_iter=1., cls_final=0.25))),
-    bbox_head=dict(
-        type='IouNetHead',
-        in_dim=(4 * 128, 4 * 256),
-        pred_in_dim=(256, 256),
-        pred_inter_dim=(256, 256),
-        loss_bbox=dict(type='KLMCLoss'),
-        bbox_cfg=dict(
-            num_init_random_boxes=9,
-            box_jitter_pos=0.1,
-            box_jitter_sz=0.5,
-            iounet_topk=3,
-            box_refine_step_length=2.5e-3,
-            box_refine_iter=10,
-            max_aspect_ratio=6,
-            box_refine_step_decay=1),
-        train_cfg=dict(
-            proposals_sigma=[(0.05, 0.05), (0.5, 0.5)],
-            gt_bboxes_sigma=(0.05, 0.05),
-            num_samples=128,
-            add_first_bbox=False,
-            loss_weights=dict(bbox=0.0025))),
+        transformer_dim=384, 
+        template_feat_size=8,
+        search_feat_size=18,
+        bbox_head=dict(
+            type='CornerPredictorHead',
+            inplanes=384,
+            channel=384,
+            feat_size=20,
+            stride=16
+        ),
+        quality_head=dict(
+            type='QualityPredictorHead',
+            inplanes=384,
+            channel=384,
+            feat_size=20,
+            stride=16
+        ),
+        loss_bbox=dict(type='mmdet.L1Loss', loss_weight=5.0),
+        loss_iou=dict(type='mmdet.GIoULoss', loss_weight=2.0),
+    ),
+    train_cfg=dict(
+        feat_size=(18, 18),
+        img_size=(288, 288),
+        sigma_factor=0.05,
+        end_pad_if_even=True,
+        gauss_label_bias=0.,
+        use_gauss_density=True,
+        label_density_norm=True,
+        label_density_threshold=0.,
+        label_density_shrink=0,
+        loss_weights=dict(cls_init=0.25, cls_iter=1., cls_final=0.25)
+    ),
     test_cfg=dict(
         img_sample_size=22 * 16,
         feature_stride=16,
         search_scale_factor=6,
         patch_max_scale_change=1.5,
         border_mode='inside_major',
-        bbox_inside_ratio=0.2,
-        init_aug_cfg=dict(
-            augmentation=dict(
-                fliplr=True,
-                rotate=[10, -10, 45, -45],
-                blur=[(3, 1), (1, 3), (2, 2)],
-                relativeshift=[(0.6, 0.6), (-0.6, 0.6), (0.6, -0.6),
-                               (-0.6, -0.6)],
-                dropout=[0.2, 0.2]),
-            aug_expansion_factor=2,
-            random_shift_factor=1 / 3)))
-
+    )
+),
+    
 train_pipeline = [
     dict(
         type='DiMPSampling',

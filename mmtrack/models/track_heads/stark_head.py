@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from mmcv.cnn.bricks import ConvModule
 from mmcv.cnn.bricks.transformer import build_positional_encoding
-from mmdet.models.layers import Transformer
+# from mmdet.models.layers import Transformer
 from mmengine.model import BaseModule
 from mmengine.structures import InstanceData
 from torch import Tensor, nn
@@ -176,91 +176,91 @@ class ScoreHead(nn.Module):
         return x.view(-1, 1)
 
 
-@MODELS.register_module()
-class StarkTransformer(Transformer):
-    """The transformer head used in STARK. `STARK.
+# @MODELS.register_module()
+# class StarkTransformer(Transformer):
+#     """The transformer head used in STARK. `STARK.
 
-    <https://arxiv.org/abs/2103.17154>`_.
+#     <https://arxiv.org/abs/2103.17154>`_.
 
-    This module follows the official DETR implementation.
-    See `paper: End-to-End Object Detection with Transformers
-    <https://arxiv.org/pdf/2005.12872>`_ for details.
+#     This module follows the official DETR implementation.
+#     See `paper: End-to-End Object Detection with Transformers
+#     <https://arxiv.org/pdf/2005.12872>`_ for details.
 
-    Args:
-        encoder (`mmengine.ConfigDict` | Dict): Config of
-            TransformerEncoder. Defaults to None.
-        decoder ((`mmengine.ConfigDict` | Dict)): Config of
-            TransformerDecoder. Defaults to None
-        init_cfg (obj:`mmengine.ConfigDict`): The Config for initialization.
-            Defaults to None.
-    """
+#     Args:
+#         encoder (`mmengine.ConfigDict` | Dict): Config of
+#             TransformerEncoder. Defaults to None.
+#         decoder ((`mmengine.ConfigDict` | Dict)): Config of
+#             TransformerDecoder. Defaults to None
+#         init_cfg (obj:`mmengine.ConfigDict`): The Config for initialization.
+#             Defaults to None.
+#     """
 
-    def __init__(
-        self,
-        encoder: OptConfigType = None,
-        decoder: OptConfigType = None,
-        init_cfg: OptConfigType = None,
-    ):
-        super(StarkTransformer, self).__init__(
-            encoder=encoder, decoder=decoder, init_cfg=init_cfg)
+#     def __init__(
+#         self,
+#         encoder: OptConfigType = None,
+#         decoder: OptConfigType = None,
+#         init_cfg: OptConfigType = None,
+#     ):
+#         super(StarkTransformer, self).__init__(
+#             encoder=encoder, decoder=decoder, init_cfg=init_cfg)
 
-    def forward(self, x: Tensor, mask: Tensor, query_embed: Tensor,
-                pos_embed: Tensor) -> Tuple[Tensor, Tensor]:
-        """Forward function for `StarkTransformer`.
+#     def forward(self, x: Tensor, mask: Tensor, query_embed: Tensor,
+#                 pos_embed: Tensor) -> Tuple[Tensor, Tensor]:
+#         """Forward function for `StarkTransformer`.
 
-        The difference with transofrmer module in `MMCV` is the input shape.
-        The sizes of template feature maps and search feature maps are
-        different. Thus, we must flatten and concatenate them outside this
-        module. The `MMCV` flatten the input features inside tranformer module.
+#         The difference with transofrmer module in `MMCV` is the input shape.
+#         The sizes of template feature maps and search feature maps are
+#         different. Thus, we must flatten and concatenate them outside this
+#         module. The `MMCV` flatten the input features inside tranformer module.
 
-        Args:
-            x (Tensor): Input query with shape (feats_flatten_len, bs, c)
-                where c = embed_dims.
-            mask (Tensor): The key_padding_mask used for encoder and decoder,
-                with shape (bs, feats_flatten_len).
-            query_embed (Tensor): The query embedding for decoder, with shape
-                (num_query, c).
-            pos_embed (Tensor): The positional encoding for encoder and
-                decoder, with shape (feats_flatten_len, bs, c).
+#         Args:
+#             x (Tensor): Input query with shape (feats_flatten_len, bs, c)
+#                 where c = embed_dims.
+#             mask (Tensor): The key_padding_mask used for encoder and decoder,
+#                 with shape (bs, feats_flatten_len).
+#             query_embed (Tensor): The query embedding for decoder, with shape
+#                 (num_query, c).
+#             pos_embed (Tensor): The positional encoding for encoder and
+#                 decoder, with shape (feats_flatten_len, bs, c).
 
-            Here, 'feats_flatten_len' = z_feat_h*z_feat_w*2 + \
-                x_feat_h*x_feat_w.
-            'z_feat_h' and 'z_feat_w' denote the height and width of the
-            template features respectively.
-            'x_feat_h' and 'x_feat_w' denote the height and width of search
-            features respectively.
-        Returns:
-            tuple[Tensor, Tensor]: results of decoder containing the following
-                tensor.
-                - out_dec: Output from decoder. If return_intermediate_dec \
-                      is True, output has shape [num_dec_layers, bs,
-                      num_query, embed_dims], else has shape [1, bs, \
-                      num_query, embed_dims].
-                      Here, return_intermediate_dec=False
-                - enc_mem: Output results from encoder, with shape \
-                      (feats_flatten_len, bs, embed_dims).
-        """
-        _, bs, _ = x.shape
-        query_embed = query_embed.unsqueeze(1).repeat(
-            1, bs, 1)  # [num_query, embed_dims] -> [num_query, bs, embed_dims]
+#             Here, 'feats_flatten_len' = z_feat_h*z_feat_w*2 + \
+#                 x_feat_h*x_feat_w.
+#             'z_feat_h' and 'z_feat_w' denote the height and width of the
+#             template features respectively.
+#             'x_feat_h' and 'x_feat_w' denote the height and width of search
+#             features respectively.
+#         Returns:
+#             tuple[Tensor, Tensor]: results of decoder containing the following
+#                 tensor.
+#                 - out_dec: Output from decoder. If return_intermediate_dec \
+#                       is True, output has shape [num_dec_layers, bs,
+#                       num_query, embed_dims], else has shape [1, bs, \
+#                       num_query, embed_dims].
+#                       Here, return_intermediate_dec=False
+#                 - enc_mem: Output results from encoder, with shape \
+#                       (feats_flatten_len, bs, embed_dims).
+#         """
+#         _, bs, _ = x.shape
+#         query_embed = query_embed.unsqueeze(1).repeat(
+#             1, bs, 1)  # [num_query, embed_dims] -> [num_query, bs, embed_dims]
 
-        enc_mem = self.encoder(
-            query=x,
-            key=None,
-            value=None,
-            query_pos=pos_embed,
-            query_key_padding_mask=mask)
-        target = torch.zeros_like(query_embed)
-        # out_dec: [num_dec_layers, num_query, bs, embed_dims]
-        out_dec = self.decoder(
-            query=target,
-            key=enc_mem,
-            value=enc_mem,
-            key_pos=pos_embed,
-            query_pos=query_embed,
-            key_padding_mask=mask)
-        out_dec = out_dec.transpose(1, 2)
-        return out_dec, enc_mem
+#         enc_mem = self.encoder(
+#             query=x,
+#             key=None,
+#             value=None,
+#             query_pos=pos_embed,
+#             query_key_padding_mask=mask)
+#         target = torch.zeros_like(query_embed)
+#         # out_dec: [num_dec_layers, num_query, bs, embed_dims]
+#         out_dec = self.decoder(
+#             query=target,
+#             key=enc_mem,
+#             value=enc_mem,
+#             key_pos=pos_embed,
+#             query_pos=query_embed,
+#             key_padding_mask=mask)
+#         out_dec = out_dec.transpose(1, 2)
+#         return out_dec, enc_mem
 
 
 @MODELS.register_module()

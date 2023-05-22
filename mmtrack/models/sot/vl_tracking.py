@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from mmdet.structures.bbox.transforms import bbox_xyxy_to_cxcywh
 from torch import Tensor
@@ -22,8 +23,9 @@ class VLTracker(BaseSingleObjectTracker):
     
     def __init__(self, 
                  backbone, 
-                 cls_head,
+                 feat_fusion,
                  bbox_head,
+                 quality_head,
                  train_cfg,
                  test_cfg,
                  frozen_modules = None,
@@ -32,8 +34,10 @@ class VLTracker(BaseSingleObjectTracker):
         super().__init__(data_preprocessor, init_cfg)
         
         self.backbone = MODELS.build(backbone)
-        self.cls_head = MODELS.build(cls_head)
+        self.feat_fusion = MODELS.build(feat_fusion)
         self.bbox_head = MODELS.build(bbox_head)
+        
+        self.quality_head = MODELS.build(quality_head)
 
         self.test_cfg = test_cfg
         self.train_cfg = train_cfg
@@ -54,7 +58,7 @@ class VLTracker(BaseSingleObjectTracker):
         feat = self.backbone(img)
         return feat
     
-    def fuse_feature(self, feat: Tensor) -> Tensor:
+    def fuse_feature(self, x_feat: Tensor, z_feat: Tensor) -> Tensor:
         """Fuse the features of the input image.
 
         Args:
@@ -64,10 +68,46 @@ class VLTracker(BaseSingleObjectTracker):
         Returns:
             Tensor: the fused feature map of shape (N, C, H, W).
         """
-        feat = self.cls_head(feat)
-        return feat
+        x_emb, z_emb, token_emb = self.feat_fusion(x_feat, z_feat)
+        return x_emb, z_emb, token_emb
+    
+    def forward_bbox_head(self, feat: Tensor, enc_mem: Tensor) -> Tensor:
+        """
+        Args:
+            feat (Tensor): output embeddings of decoder, with shape
+                (1, bs, num_query, c).
+            enc_mem (Tensor): output embeddings of encoder, with shape
+                (feats_flatten_len, bs, C)
+
+                Here, 'feats_flatten_len' = z_feat_h*z_feat_w*2 + \
+                    x_feat_h*x_feat_w.
+                'z_feat_h' and 'z_feat_w' denote the height and width of the
+                template features respectively.
+                'x_feat_h' and 'x_feat_w' denote the height and width of search
+                features respectively.
+        Returns:
+            Tensor: of shape (bs * num_query, 4). The bbox is in
+                [tl_x, tl_y, br_x, br_y] format.
+        """
+        z_feat_len = self.bbox_head.feat_size**2
+        # the output of encoder for the search image
+        x_feat = enc_mem[-z_feat_len:].transpose(
+            0, 1)  # (bs, x_feat_h*x_feat_w, c)
+        dec_embed = feat.squeeze(0).transpose(1, 2)  # (bs, c, num_query)
+        attention = torch.matmul(
+            x_feat, dec_embed)  # (bs, x_feat_h*x_feat_w, num_query)
+        bbox_feat = (x_feat.unsqueeze(-1) * attention.unsqueeze(-2))
+
+        # (bs, x_feat_h*x_feat_w, c, num_query) --> (bs, num_query, c, x_feat_h*x_feat_w) # noqa
+        bbox_feat = bbox_feat.permute((0, 3, 2, 1)).contiguous()
+        bs, num_query, dim, _ = bbox_feat.size()
+        bbox_feat = bbox_feat.view(-1, dim, self.bbox_head.feat_size,
+                                   self.bbox_head.feat_size)
+        # run the corner prediction head
+        outputs_coord = self.bbox_head(bbox_feat)
+        return outputs_coord
             
-    def forward_train(self, inputs, data_samples, **kwargs):
+    def loss(self, inputs, data_samples, **kwargs):
                       
         """Forward of training.
 
@@ -104,10 +144,9 @@ class VLTracker(BaseSingleObjectTracker):
         x_feat = self.extract_feat(search_img)
         z_feat = self.extract_feat(template_img)
         
-        # fuse feature
-        fused_feat, pred_token = self.fuse_feature(x_feat)
-        
-        # Run box head for regression
+        loss = self.head.loss(x_feat, z_feat, text, data_samples)
+
+        return loss
         
         
         

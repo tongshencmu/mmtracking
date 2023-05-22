@@ -1,5 +1,3 @@
-## Adapted from open_CLIP: https://github.com/mlfoundations/open_clip/blob/main/src/open_clip/transformer.py
-
 from collections import OrderedDict
 import math
 from typing import Callable, Optional, Sequence, Tuple
@@ -9,8 +7,22 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-from .utils import to_2tuple
+from itertools import repeat
+import collections.abc
 
+# From PyTorch internals
+def _ntuple(n):
+    def parse(x):
+        if isinstance(x, collections.abc.Iterable):
+            return x
+        return tuple(repeat(x, n))
+    return parse
+
+
+to_1tuple = _ntuple(1)
+to_2tuple = _ntuple(2)
+to_3tuple = _ntuple(3)
+to_4tuple = _ntuple(4)
 
 class LayerNormFp32(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16 (by casting to float32 and back)."""
@@ -30,10 +42,10 @@ class LayerNorm(nn.LayerNorm):
         return x.to(orig_type)
 
 
-# class QuickGELU(nn.Module):
-#     # NOTE This is slower than nn.GELU or nn.SiLU and uses more GPU memory
-#     def forward(self, x: torch.Tensor):
-#         return x * torch.sigmoid(1.702 * x)
+class QuickGELU(nn.Module):
+    # NOTE This is slower than nn.GELU or nn.SiLU and uses more GPU memory
+    def forward(self, x: torch.Tensor):
+        return x * torch.sigmoid(1.702 * x)
 
 
 class LayerScale(nn.Module):
@@ -353,6 +365,8 @@ class VisionTransformer(nn.Module):
         patch_height, patch_width = self.patch_size = to_2tuple(patch_size)
         self.grid_size = (image_height // patch_height, image_width // patch_width)
         self.output_dim = output_dim
+        
+        self.width = width
 
         # whether to layernorm each patch, as done in dual patchnorm paper - https://arxiv.org/abs/2302.01327v1
         self.input_patchnorm = input_patchnorm
@@ -470,15 +484,31 @@ class VisionTransformer(nn.Module):
             x = self.patchnorm_pre_ln(x)
             x = self.conv1(x)
         else:
+            assert x.shape[2] % self.patch_size[0] == 0 and x.shape[3] % self.patch_size[1] == 0 
             x = self.conv1(x)  # shape = [*, width, grid, grid]
+            patch_H, patch_W = x.shape[2], x.shape[3]
             x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
             x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
-
+        
+        # If input size is smaller than the grid size, we interpolate the pos embedding to fit the input size
+        if patch_H != self.grid_size[0] or patch_W != self.grid_size[1]:
+            
+            new_pos_embed = self.positional_embedding[:-1, :].reshape(1, self.grid_size[0], self.grid_size[1], -1)
+            new_pos_embed = new_pos_embed.permute(0, 3, 1, 2)
+            new_pos_embed = nn.functional.interpolate(new_pos_embed, size=(patch_H, patch_W), mode='bicubic',
+                                                           align_corners=False)
+            new_pos_embed = new_pos_embed.permute(0, 2, 3, 1).reshape(patch_H * patch_W, self.width)
+            new_pos_embed = torch.cat([self.positional_embedding[-1:, :], new_pos_embed], dim=0)
+            
+        else:
+            new_pos_embed = self.positional_embedding
+            
         # class embeddings and positional embeddings
         x = torch.cat(
             [self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device),
              x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype)
+        
+        x = x + new_pos_embed.to(x.dtype)
 
         # a patch_dropout of 0. would mean it is disabled and this function would do nothing but return what was passed in
         x = self.patch_dropout(x)
