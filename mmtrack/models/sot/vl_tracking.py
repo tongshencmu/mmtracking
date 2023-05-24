@@ -23,22 +23,17 @@ class VLTracker(BaseSingleObjectTracker):
     
     def __init__(self, 
                  backbone, 
-                 feat_fusion,
-                 bbox_head,
-                 quality_head,
+                 head,
                  train_cfg,
                  test_cfg,
                  frozen_modules = None,
                  data_preprocessor: OptConfigType = None, 
                  init_cfg: OptMultiConfig = None) -> None:
-        super().__init__(data_preprocessor, init_cfg)
+        super(VLTracker, self).__init__(data_preprocessor, init_cfg)
         
         self.backbone = MODELS.build(backbone)
-        self.feat_fusion = MODELS.build(feat_fusion)
-        self.bbox_head = MODELS.build(bbox_head)
+        self.head = MODELS.build(head)
         
-        self.quality_head = MODELS.build(quality_head)
-
         self.test_cfg = test_cfg
         self.train_cfg = train_cfg
         
@@ -138,15 +133,47 @@ class VLTracker(BaseSingleObjectTracker):
         ) == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
         template_img = template_img[:, 0]
         
-        text = inputs['text']
+        # text = inputs['text']
         
         # extract feature
-        x_feat = self.extract_feat(search_img)
-        z_feat = self.extract_feat(template_img)
+        x_feat = self.extract_feat(search_img)     # (N, L, D)
+        z_feat = self.extract_feat(template_img)   # (N, L, D)
         
-        loss = self.head.loss(x_feat, z_feat, text, data_samples)
+        x_feat = x_feat[:, 1:, :]  
+        z_feat = z_feat[:, 1:, :]
+        
+        head_inputs = dict(x_embeddings=x_feat, z_embeddings=z_feat)
+        # head_inputs.append(dict(x_embeddings=x_feat))
+        # head_inputs.append(dict(z_embeddings=z_feat))
+        
+        loss = self.head.loss(head_inputs, data_samples)
 
         return loss
         
-        
+    def init(img: Tensor):
+        """Initialize the single object tracker in the first frame.
+
+        Args:
+            img (Tensor): of shape (1, C, H, W) encoding original input
+                image.
+        """
+        pass
+
+    def track(img: Tensor, data_samples: SampleList) -> InstanceList:
+        """Track the box of previous frame to current frame `img`.
+
+        Args:
+            img (Tensor): of shape (1, C, H, W) encoding original input
+                image.
+            data_samples (list[:obj:`TrackDataSample`]): The batch
+                data samples. It usually includes information such
+                as ``gt_instances`` and 'metainfo'.
+
+        Returns:
+            InstanceList: Tracking results of each image after the postprocess.
+                - scores: a Tensor denoting the score of best_bbox.
+                - bboxes: a Tensor of shape (4, ) in [x1, x2, y1, y2]
+                format, and denotes the best tracked bbox in current frame.
+        """
+        pass
         

@@ -4,6 +4,10 @@ import logging
 import os
 import os.path as osp
 
+import sys
+sys.path.append('/home/tong/code/vl_tracking/mmdetection/')
+sys.path.append('/home/tong/code/vl_tracking/mmtracking/')
+
 from mmengine.config import Config, DictAction
 from mmengine.logging import print_log
 from mmengine.registry import RUNNERS

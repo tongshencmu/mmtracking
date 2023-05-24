@@ -10,6 +10,8 @@ from torch.utils.checkpoint import checkpoint
 from itertools import repeat
 import collections.abc
 
+from mmtrack.registry import MODELS
+
 # From PyTorch internals
 def _ntuple(n):
     def parse(x):
@@ -335,7 +337,7 @@ class Transformer(nn.Module):
                 x = r(x, attn_mask=attn_mask)
         return x
 
-
+@MODELS.register_module()
 class VisionTransformer(nn.Module):
     output_tokens: torch.jit.Final[bool]
 
@@ -517,24 +519,26 @@ class VisionTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-
-        if self.attn_pool is not None:
-            x = self.attn_pool(x)
-            x = self.ln_post(x)
-            pooled, tokens = self._global_pool(x)
-        else:
-            pooled, tokens = self._global_pool(x)
-            pooled = self.ln_post(pooled)
-
-        if self.proj is not None:
-            pooled = pooled @ self.proj
-
-        if self.output_tokens:
-            return pooled, tokens
         
-        return pooled
+        return x
 
+        # if self.attn_pool is not None:
+        #     x = self.attn_pool(x)
+        #     x = self.ln_post(x)
+        #     pooled, tokens = self._global_pool(x)
+        # else:
+        #     pooled, tokens = self._global_pool(x)
+        #     pooled = self.ln_post(pooled)
 
+        # if self.proj is not None:
+        #     pooled = pooled @ self.proj
+
+        # if self.output_tokens:
+        #     return pooled, tokens
+        
+        # return pooled
+
+@MODELS.register_module()
 class TextTransformer(nn.Module):
     output_tokens: torch.jit.Final[bool]
 

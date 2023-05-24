@@ -3,7 +3,7 @@
 
 
 import torch 
-import torch.nn as nn
+from torch import nn, Tensor
 from typing import List, Tuple, Type, Any, Optional
 
 import numpy as np
@@ -47,15 +47,17 @@ class LayerNorm2d(nn.Module):
 
 
 @MODELS.register_module()
-class MultiModelFusion(nn.Module):
+class MultiModalFusionHead(nn.Module):
     
     def __init__(self,
                  transformer, 
                  bbox_head, 
-                 quality_head,
                  transformer_dim,
                  search_feat_size,
                  template_feat_size,
+                 loss_bbox,
+                 loss_quality,
+                 loss_iou,
                  ) -> None:
         super().__init__()
         
@@ -63,49 +65,68 @@ class MultiModelFusion(nn.Module):
         self.transformer_dim = transformer_dim
         
         self.bbox_head = MODELS.build(bbox_head)
-        self.quality_head = MODELS.build(quality_head)
-        
+        self.quality_head = nn.Sequential(
+            nn.Linear(transformer_dim, transformer_dim // 2),
+            nn.GELU(),
+            nn.Linear(transformer_dim // 2, 1),
+            nn.Sigmoid()
+        )
+
         self.template_feat_size = template_feat_size
         self.search_feat_size = search_feat_size
         
-        self.template_pe_layer = PositionEmbeddingRandom(num_pos_feats=transformer_dim)
-        self.search_pe_layer = PositionEmbeddingRandom(num_pos_feats=transformer_dim)
+        self.template_pe_layer = PositionEmbeddingRandom(num_pos_feats=transformer_dim // 2)
+        self.search_pe_layer = PositionEmbeddingRandom(num_pos_feats=transformer_dim // 2)
         
         self.pred_quality_token = nn.Embedding(1, transformer_dim)
+        
+        self.loss_bbox = MODELS.build(loss_bbox)
+        self.loss_quality = MODELS.build(loss_quality)
+        self.loss_iou = MODELS.build(loss_iou)
         
     def forward(self, 
                 x_embeddings,
                 z_embeddings, 
                 text_embeddings=None):
         
-        # Concatenate z_embeddings and text_embeddings into prompt embeddings and go through transformer
-        prompt_pe = self.template_pe_layer([self.template_feat_size, self.template_feat_size])
-        image_pe = self.search_pe_layer([self.search_feat_size, self.search_feat_size])
+        b, l_x, d = x_embeddings.shape
+        _, l_z, d = z_embeddings.shape
         
+        # Calculate positional embeddings for template and search
+        prompt_pe = self.template_pe_layer([self.template_feat_size, self.template_feat_size]).flatten(1, 2).permute(1, 0)
+        x_pe = self.search_pe_layer([self.search_feat_size, self.search_feat_size])
+        
+        # Concatenate z_embeddings and text_embeddings into prompt embeddings and go through transformer
         if text_embeddings is not None:
             prompt_embeddings = torch.cat([z_embeddings, text_embeddings], dim=-1)
             prompt_pe = torch.cat([prompt_pe, text_embeddings], dim=-1)
         else:
             prompt_embeddings = z_embeddings
             
-        assert x_embeddings.shape[0:2] == prompt_embeddings.shape[0:2]
-        b, c, h_z, w_z = z_embeddings.shape
-        _, _, h_x, w_x = x_embeddings.shape
+        assert x_embeddings.shape[0] == prompt_embeddings.shape[0] 
+        assert x_embeddings.shape[2] == prompt_embeddings.shape[2] 
         
-        # prompt_embeddings = prompt_embeddings.permute(0, 3, 1, 2)
-        prompt_embeddings = torch.cat([prompt_embeddings, self.pred_quality_token], dim=1)
-        prompt_embeddings, image_embeddings = self.transformer(x_embeddings, image_pe, prompt_embeddings, prompt_pe)
+        quality_token = self.pred_quality_token.weight.unsqueeze(0).repeat(b, 1, 1)
+        prompt_embeddings = torch.cat([prompt_embeddings, quality_token], dim=1)
+        prompt_pe = torch.cat([prompt_pe, self.pred_quality_token.weight], dim=0)
         
-        token_emb = prompt_embeddings[:, 0, :]
-        z_emb = prompt_embeddings[:, 1:, :]
+        x_embeddings = x_embeddings.permute(0, 2, 1).reshape(b, d, self.search_feat_size, self.search_feat_size)
+        x_pe = x_pe.unsqueeze(0).repeat(b, 1, 1, 1)
+        prompt_pe = prompt_pe.unsqueeze(0).repeat(b, 1, 1)
+        
+        prompt_embeddings, image_embeddings = self.transformer(x_embeddings, x_pe, prompt_embeddings, prompt_pe)
+        
+        token_emb = prompt_embeddings[:, -1, :]
+        z_emb = prompt_embeddings[:, :-1, :]
         
         # Run box head for regression
+        image_embeddings = image_embeddings.permute(0, 2, 1).reshape(b, d, self.search_feat_size, self.search_feat_size)
         output_coords = self.bbox_head(image_embeddings)
         
         # Generate tracking quality prediction using token embedding
         quality_pred = self.quality_head(token_emb)
         
-        return output_coords, quality_pred
+        return quality_pred, output_coords
     
     def loss(self, inputs: List[dict], data_samples: SampleList,
              **kwargs) -> dict:
@@ -126,7 +147,7 @@ class MultiModelFusion(nn.Module):
         Returns:
             dict[str, Tensor]: a dictionary of loss components.
         """
-        outs = self(inputs)
+        outs = self(**inputs)
 
         batch_gt_instances = []
         batch_img_metas = []
@@ -139,6 +160,65 @@ class MultiModelFusion(nn.Module):
         loss_inputs = outs + (batch_gt_instances, batch_search_gt_instances,
                               batch_img_metas)
         losses = self.loss_by_feat(*loss_inputs)
+
+        return losses
+    
+    def loss_by_feat(self, pred_quality: Tensor, pred_bboxes: Tensor,
+                     batch_gt_instances: InstanceList,
+                     batch_search_gt_instances: InstanceList,
+                     batch_img_metas: List[dict]) -> dict:
+        """Compute loss.
+
+        Args:
+            pred_quality: (Tensor) of shape (bs * num_query, 1). This item
+                only exists when the model has classification head.
+            pred_bboxes: (Tensor) of shape (bs * num_query, 4), in
+                [tl_x, tl_y, br_x, br_y] format
+            batch_gt_instances (InstanceList): the instances in a batch.
+            batch_search_gt_instances (InstanceList): the search instances in a
+                batch.
+            batch_img_metas (List[dict]): the meta information of all images in
+                a batch.
+
+        Returns:
+            dict[str, Tensor]: A dictionary of loss components.
+        """
+        losses = dict()
+        # Calculate bbox regression loss
+        assert pred_bboxes is not None
+        img_shape = batch_img_metas[0]['search_img_shape']
+        pred_bboxes[:, 0:4:2] = pred_bboxes[:, 0:4:2] / float(img_shape[1])
+        pred_bboxes[:, 1:4:2] = pred_bboxes[:, 1:4:2] / float(img_shape[0])
+
+        gt_bboxes = [
+            instance['bboxes'] for instance in batch_search_gt_instances
+        ]
+        gt_bboxes = torch.cat(gt_bboxes, dim=0).type(torch.float32)
+        gt_bboxes[:, 0:4:2] = gt_bboxes[:, 0:4:2] / float(img_shape[1])
+        gt_bboxes[:, 1:4:2] = gt_bboxes[:, 1:4:2] / float(img_shape[0])
+        gt_bboxes = gt_bboxes.clamp(0., 1.)
+
+        # regression IoU loss, default GIoU loss
+        if (pred_bboxes[:, :2] >= pred_bboxes[:, 2:]).any() or (
+                gt_bboxes[:, :2] >= gt_bboxes[:, 2:]).any():
+            # the first several iterations of train may return invalid
+            # bbox coordinates.
+            losses['loss_iou'] = (pred_bboxes - gt_bboxes).sum() * 0.0
+        else:
+            losses['loss_iou'] = self.loss_iou(pred_bboxes, gt_bboxes)
+        # regression L1 loss
+        losses['loss_bbox'] = self.loss_bbox(pred_bboxes, gt_bboxes)
+
+        # quality prediction loss
+        assert pred_quality is not None
+        pred_quality = pred_quality.squeeze()
+
+        gt_labels = [
+            instance['labels'] for instance in batch_search_gt_instances
+        ]
+        gt_labels = torch.cat(
+            gt_labels, dim=0).type(torch.float32).squeeze()
+        losses['loss_quality'] = self.loss_quality(pred_quality, gt_labels)
 
         return losses
         

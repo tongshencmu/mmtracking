@@ -2,5 +2,6 @@
 from .prdimp import PrDiMP
 from .siamrpn import SiamRPN
 from .stark import Stark
+from .vl_tracking import VLTracker
 
-__all__ = ['SiamRPN', 'Stark', 'PrDiMP']
+__all__ = ['SiamRPN', 'Stark', 'PrDiMP', 'VLTracker']

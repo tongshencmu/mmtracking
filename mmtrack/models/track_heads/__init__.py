@@ -8,9 +8,12 @@ from .roi_embed_head import RoIEmbedHead
 from .roi_track_head import RoITrackHead
 from .siamese_rpn_head import CorrelationHead, SiameseRPNHead
 from .stark_head import CornerPredictorHead, StarkHead
+from .sam_transformer import TwoWayTransformer
+from .multimodal_head import MultiModalFusionHead
 
 __all__ = [
     'CorrelationHead', 'SiameseRPNHead', 'RoIEmbedHead', 'RoITrackHead',
     'StarkHead', 'CornerPredictorHead', 'QuasiDenseEmbedHead',
-    'QuasiDenseTrackHead', 'PrDiMPClsHead', 'IouNetHead', 'Mask2FormerHead'
+    'QuasiDenseTrackHead', 'PrDiMPClsHead', 'IouNetHead', 'Mask2FormerHead', 
+    'TwoWayTransformer', 'MultiModalFusionHead'
 ]
