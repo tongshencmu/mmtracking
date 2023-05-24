@@ -39,8 +39,8 @@ model = dict(
             feat_size=18,
             stride=16
         ),
-        loss_bbox=dict(type='mmdet.L1Loss', loss_weight=5.0),
-        loss_iou=dict(type='mmdet.GIoULoss', loss_weight=2.0),
+        loss_bbox=dict(type='mmdet.L1Loss', loss_weight=1.0),
+        loss_iou=dict(type='mmdet.GIoULoss', loss_weight=1.0),
         loss_quality=dict(type='mmcls.CrossEntropyLoss', loss_weight=1.0)
     ),
     train_cfg=dict(
@@ -154,8 +154,9 @@ optim_wrapper = dict(
     paramwise_cfg=dict(
         custom_keys=dict(
             backbone=dict(lr_multi=0.1),
-            classifier=dict(lr_multi=5),
-            bbox_regressor=dict(lr_multi=5))))
+            head=dict(lr_multi=1),)
+        )
+    )
 
 # checkpoint saving
 default_hooks = dict(

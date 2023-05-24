@@ -106,13 +106,13 @@ class MultiModalFusionHead(nn.Module):
         assert x_embeddings.shape[0] == prompt_embeddings.shape[0] 
         assert x_embeddings.shape[2] == prompt_embeddings.shape[2] 
         
-        quality_token = self.pred_quality_token.weight.unsqueeze(0).repeat(b, 1, 1)
+        quality_token = self.pred_quality_token.weight.unsqueeze(0).expand(b, -1, -1)
         prompt_embeddings = torch.cat([prompt_embeddings, quality_token], dim=1)
         prompt_pe = torch.cat([prompt_pe, self.pred_quality_token.weight], dim=0)
         
         x_embeddings = x_embeddings.permute(0, 2, 1).reshape(b, d, self.search_feat_size, self.search_feat_size)
-        x_pe = x_pe.unsqueeze(0).repeat(b, 1, 1, 1)
-        prompt_pe = prompt_pe.unsqueeze(0).repeat(b, 1, 1)
+        x_pe = x_pe.unsqueeze(0).expand(b, -1, -1, -1)
+        prompt_pe = prompt_pe.unsqueeze(0).expand(b, -1, -1)
         
         prompt_embeddings, image_embeddings = self.transformer(x_embeddings, x_pe, prompt_embeddings, prompt_pe)
         
