@@ -81,7 +81,7 @@ class MultiModalFusionHead(nn.Module):
         self.pred_quality_token = nn.Embedding(1, transformer_dim)
         
         self.loss_bbox = MODELS.build(loss_bbox)
-        self.loss_quality = MODELS.build(loss_quality)
+        self.loss_quality = nn.L1Loss()
         self.loss_iou = MODELS.build(loss_iou)
         
     def forward(self, 
@@ -211,7 +211,7 @@ class MultiModalFusionHead(nn.Module):
 
         # quality prediction loss
         assert pred_quality is not None
-        pred_quality = pred_quality.squeeze()
+        pred_quality = pred_quality.squeeze(-1)
 
         gt_labels = [
             instance['labels'] for instance in batch_search_gt_instances

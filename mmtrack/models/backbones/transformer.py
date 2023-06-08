@@ -12,6 +12,8 @@ import collections.abc
 
 from mmtrack.registry import MODELS
 
+from mmengine.model import BaseModule
+
 # From PyTorch internals
 def _ntuple(n):
     def parse(x):
@@ -338,7 +340,7 @@ class Transformer(nn.Module):
         return x
 
 @MODELS.register_module()
-class VisionTransformer(nn.Module):
+class VisionTransformer(BaseModule):
     output_tokens: torch.jit.Final[bool]
 
     def __init__(
@@ -359,7 +361,8 @@ class VisionTransformer(nn.Module):
             input_patchnorm: bool = False,
             act_layer: Callable = nn.GELU,
             norm_layer: Callable = LayerNorm,
-            output_tokens: bool = False
+            output_tokens: bool = False,
+            init_cfg: Optional[dict] = None
     ):
         super().__init__()
         self.output_tokens = output_tokens
@@ -401,14 +404,14 @@ class VisionTransformer(nn.Module):
         )
 
         self.global_average_pool = global_average_pool
-        if attentional_pool:
-            self.attn_pool = AttentionalPooler(output_dim, width, n_head=attn_pooler_heads, n_queries=n_queries)
-            self.ln_post = norm_layer(output_dim)
-            self.proj = nn.Parameter(scale * torch.randn(output_dim, output_dim))
-        else:
-            self.attn_pool = None
-            self.ln_post = norm_layer(width)
-            self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
+        # if attentional_pool:
+        #     self.attn_pool = AttentionalPooler(output_dim, width, n_head=attn_pooler_heads, n_queries=n_queries)
+        #     self.ln_post = norm_layer(output_dim)
+        #     self.proj = nn.Parameter(scale * torch.randn(output_dim, output_dim))
+        # else:
+        #     self.attn_pool = None
+        #     self.ln_post = norm_layer(width)
+        #     self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
         self.init_parameters()
 

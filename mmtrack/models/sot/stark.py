@@ -16,6 +16,8 @@ from mmtrack.utils import (InstanceList, OptConfigType, OptMultiConfig,
                            SampleList)
 from .base import BaseSingleObjectTracker
 
+import math
+
 
 @MODELS.register_module()
 class Stark(BaseSingleObjectTracker):
@@ -98,6 +100,10 @@ class Stark(BaseSingleObjectTracker):
                     of shape (N, C, H // stride, W // stride).
         """
         feat = self.backbone(img)
+        width = feat.shape[1]
+        H = int(math.sqrt(width - 1))
+        size = feat.shape
+        feat = [feat[:, 1:, :].permute(0, 2, 1).reshape(size[0], size[2], H, H)]
         feat = self.neck(feat)
         return feat
 

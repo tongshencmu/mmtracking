@@ -32,6 +32,8 @@ class VLTracker(BaseSingleObjectTracker):
         super(VLTracker, self).__init__(data_preprocessor, init_cfg)
         
         self.backbone = MODELS.build(backbone)
+        for name, param in self.backbone.named_parameters():
+            print(name)
         self.head = MODELS.build(head)
         
         self.test_cfg = test_cfg

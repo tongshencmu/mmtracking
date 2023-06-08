@@ -18,7 +18,9 @@ model = dict(
         layers=12,
         heads=12,
         mlp_ratio=4.0,
-        # init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')
+        init_cfg=dict(
+            type='Pretrained', 
+            checkpoint='/ocean/projects/ele220002p/tongshen/code/vl_tracking/vit-b-16-laion-2b_visual.pth')
     ),
     head=dict(
         type='MultiModalFusionHead',
@@ -27,7 +29,7 @@ model = dict(
             depth=3,
             embedding_dim=768,
             num_heads=8,
-            mlp_dim=2048,
+            mlp_dim=1024,
         ),
         transformer_dim=768, 
         template_feat_size=8,
@@ -41,7 +43,7 @@ model = dict(
         ),
         loss_bbox=dict(type='mmdet.L1Loss', loss_weight=1.0),
         loss_iou=dict(type='mmdet.GIoULoss', loss_weight=1.0),
-        loss_quality=dict(type='mmcls.CrossEntropyLoss', loss_weight=1.0)
+        loss_quality=dict(type='mmdet.L1loss', loss_weight=1.0)
     ),
     train_cfg=dict(
         feat_size=(18, 18),
@@ -96,48 +98,50 @@ train_pipeline = [
     dict(type='PackTrackInputs', ref_prefix='search', num_template_frames=2)
 ]
 
-data_root = '/home/tong/dataset/'
+data_root = '/ocean/projects/ele220002p/tongshen/dataset/'
 # dataset settings
 train_dataloader = dict(
-    batch_size=8,
-    num_workers=2,
-    persistent_workers=False,
+    batch_size=32,
+    num_workers=8,
+    persistent_workers=True,
     sampler=dict(type='QuotaSampler', samples_per_epoch=60000),
     dataset=dict(
-        # type='RandomSampleConcatDataset',
-        # # dataset_sampling_weights=[1, 1, 1, 1],
+        type='RandomSampleConcatDataset',
+        dataset_sampling_weights=[1, 1, 1, 1],
         # dataset_sampling_weights=[1],
-        # datasets=[
-        #     # dict(
-        #     #     type='GOT10kDataset',
-        #     #     data_root=data_root,
-        #     #     ann_file='GOT10k/annotations/got10k_train_vot_infos.txt',
-        #     #     data_prefix=dict(img_path='GOT10k'),
-        #     #     pipeline=train_pipeline,
-        #     #     test_mode=False),
-        #     dict(
-                type='LaSOTDataset',
+        datasets=[
+            dict(
+                type='GOT10kDataset',
                 data_root=data_root,
-                ann_file='lasot/annotations/lasot_train_infos.txt',
-                data_prefix=dict(img_path='lasot/LaSOTBenchmark'),
+                ann_file='got10k/annotations/got10k_train_infos.txt',
+                data_prefix=dict(img_path='got10k'),
                 pipeline=train_pipeline,
                 test_mode=False),
-            # dict(
-            #     type='TrackingNetDataset',
-            #     chunks_list=[0, 1, 2, 3],
-            #     data_root=data_root,
-            #     ann_file='TrackingNet/annotations/trackingnet_train_infos.txt',
-            #     data_prefix=dict(img_path='TrackingNet'),
-            #     pipeline=train_pipeline,
-            #     test_mode=False),
-            # dict(
-            #     type='SOTCocoDataset',
-            #     data_root=data_root,
-            #     ann_file='coco/annotations/instances_train2017.json',
-            #     data_prefix=dict(img_path='coco/train2017'),
-            #     pipeline=train_pipeline,
-            #     test_mode=False)
-        )
+            dict(
+                type='LaSOTDataset',
+                data_root=data_root,
+                ann_file='lasot_new/annotations/lasot_train_infos.txt',
+                data_prefix=dict(img_path='lasot_new/LaSOTBenchmark'),
+                pipeline=train_pipeline,
+                test_mode=False),
+            dict(
+                type='TrackingNetDataset',
+                chunks_list=[0, 1, 2, 3],
+                data_root=data_root,
+                ann_file='trackingnet/annotations/trackingnet_train_infos.txt',
+                data_prefix=dict(img_path='trackingnet'),
+                pipeline=train_pipeline,
+                test_mode=False),
+            dict(
+                type='SOTCocoDataset',
+                data_root=data_root,
+                ann_file='coco/annotations/instances_train2017.json',
+                data_prefix=dict(img_path='coco/train2017'),
+                pipeline=train_pipeline,
+                test_mode=False)
+        ],
+    )
+)
 
 # runner loop
 train_cfg = dict(
@@ -149,13 +153,13 @@ param_scheduler = dict(type='MultiStepLR', milestones=[60, 90], gamma=0.2)
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='Adam', lr=2e-4),
+    optimizer=dict(type='Adam', lr=1e-4),
     # clip_grad=dict(max_norm=0.1, norm_type=2),
-    paramwise_cfg=dict(
-        custom_keys=dict(
-            backbone=dict(lr_multi=0.1),
-            head=dict(lr_multi=1),)
-        )
+    # paramwise_cfg=dict(
+    #     custom_keys=dict(
+    #         backbone=dict(lr_multi=0.1),
+    #         head=dict(lr_multi=1),)
+    #     )
     )
 
 # checkpoint saving
