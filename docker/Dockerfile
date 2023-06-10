@@ -1,29 +1,59 @@
-ARG PYTORCH="1.6.0"
-ARG CUDA="10.1"
-ARG CUDNN="7"
-ARG MM="2.8.0"
+FROM nvcr.io/nvidia/cuda:11.6.0-cudnn8-devel-ubuntu20.04
 
-FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
+ARG PYTHON_VERSION=3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    bash-completion \
+    ca-certificates \
+    curl \
+    git \
+    htop \
+    nano \
+    openssh-client \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python-is-python3 \
+    sudo \
+    tmux \
+    unzip \
+    vim \
+    wget \ 
+    zip \ 
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6
 
-ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX"
-ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
-ENV CMAKE_PREFIX_PATH="$(dirname $(which conda))/../"
+RUN pip install ipywidgets \
+    jupyterlab \
+    matplotlib \
+    nltk \
+    notebook \
+    numpy \
+    pandas \
+    Pillow \
+    plotly \
+    PyYAML \
+    scipy \
+    scikit-image \
+    scikit-learn \
+    sympy \
+    seaborn \
+    tqdm  \
+    opencv-python \
+    pycocotools \
+    tensorboard 
 
-# To fix GPG key error when running apt-get update
-RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
-RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub
+# RUN pip install torch==1.12.1+cu116 torchvision==0.13.1+cu116 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu116
+RUN pip install torch==2.0.0+cu117 torchvision==0.15.1+cu117 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu117
 
-RUN apt-get update && apt-get install -y ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install mm series software
+RUN pip install mmengine 
 
-RUN pip install mmcv-full -f https://download.openmmlab.com/mmcv/dist/cu101/torch1.6.0/index.html
-RUN pip install mmdet
+RUN pip install mmcv==2.0.0 -f https://download.openmmlab.com/mmcv/dist/cu117/torch2.0/index.html
 
-RUN conda clean --all
-ENV FORCE_CUDA="1"
+RUN pip install mmdet==3.0.0rc2
 
-RUN git clone https://github.com/open-mmlab/mmtracking.git /mmtracking
-WORKDIR /mmtracking
-RUN pip install -r requirements/build.txt
-RUN pip install -v -e .
+RUN pip install git+https://github.com/JonathonLuiten/TrackEval.git
