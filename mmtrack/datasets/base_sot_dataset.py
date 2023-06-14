@@ -174,6 +174,17 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
             video_length=video_len)
         return img_infos
 
+    def get_nlp_from_video(self, video_idx):
+        
+        meta_video_info = self.get_data_info(video_idx)
+        nlp_path = osp.join(self.data_prefix['img_path'],
+                             meta_video_info['nlp_path'])
+        print(nlp_path)
+        with open (nlp_path, "r") as myfile:
+            nlp_data = myfile.read()
+            
+        return nlp_data
+        
     def get_ann_infos_from_video(self, video_idx: int) -> dict:
         """Get the information of annotations in a video.
 
@@ -257,10 +268,16 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
         for video_idx in video_idxes:
             ann_infos = self.get_ann_infos_from_video(video_idx)
             img_infos = self.get_img_infos_from_video(video_idx)
+            
             video_infos = dict(**img_infos, **ann_infos)
+            # video_infos['nlp'] = nlp_infos
             pair_video_infos.append(video_infos)
 
         results = self.pipeline(pair_video_infos)
+        
+        nlp_infos = self.get_nlp_from_video(video_idxes[0])
+        results['data_samples'].nlp = nlp_infos
+        
         return results
 
     def prepare_data(self, idx: Union[Sequence[int], int]) -> Any:

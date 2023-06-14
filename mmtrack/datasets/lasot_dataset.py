@@ -44,11 +44,14 @@ class LaSOTDataset(BaseSOTDataset):
         for line in data_infos_str[1:]:
             # compatible with different OS.
             line = line.strip().replace('/', os.sep).split(',')
+            ann_path = line[1]
+            nlp_path = line[1].replace('groundtruth', 'nlp')
             data_info = dict(
                 video_path=line[0],
                 ann_path=line[1],
                 start_frame_id=int(line[2]),
                 end_frame_id=int(line[3]),
+                nlp_path=nlp_path,
                 framename_template='%08d.jpg')
             data_infos.append(data_info)
         print(f'LaSOT dataset loaded! ({time.time()-start_time:.2f} s)')
