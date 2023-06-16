@@ -179,7 +179,6 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
         meta_video_info = self.get_data_info(video_idx)
         nlp_path = osp.join(self.data_prefix['img_path'],
                              meta_video_info['nlp_path'])
-        print(nlp_path)
         with open (nlp_path, "r") as myfile:
             nlp_data = myfile.read()
             

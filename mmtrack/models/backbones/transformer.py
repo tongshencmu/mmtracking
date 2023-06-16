@@ -542,7 +542,7 @@ class VisionTransformer(BaseModule):
         # return pooled
 
 @MODELS.register_module()
-class TextTransformer(nn.Module):
+class TextTransformer(BaseModule):
     output_tokens: torch.jit.Final[bool]
 
     def __init__(
@@ -559,6 +559,7 @@ class TextTransformer(nn.Module):
             embed_cls: bool = False,
             pad_id: int = 0,
             output_tokens: bool = False,
+            init_cfg: Optional[dict] = None
     ):
         super().__init__()
         self.output_tokens = output_tokens

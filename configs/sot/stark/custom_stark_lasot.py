@@ -4,7 +4,7 @@ randomness = dict(seed=1, deterministic=False)
 
 # model settings
 model = dict(
-    type='Stark',
+    type='VLStark',
     data_preprocessor=dict(
         type='TrackDataPreprocessor',
         mean=[123.675, 116.28, 103.53],
@@ -33,6 +33,20 @@ model = dict(
             type='Pretrained', 
             checkpoint='/ocean/projects/ele220002p/tongshen/code/vl_tracking/vit-b-16-laion-2b_visual.pth')
     ),
+    tokenizer=dict(
+        type='SimpleTokenizer'
+    ),
+    text_encoder=dict(
+        type='TextTransformer',
+        context_length=77,
+        vocab_size=49408,
+        width=512,
+        heads=8,
+        layers=12, 
+        init_cfg=dict(
+            type='Pretrained',
+            checkpoint='/ocean/projects/ele220002p/tongshen/code/vl_tracking/vit-b-16-laion-2b_text.pth')
+    ),
     neck=dict(
         type='mmdet.ChannelMapper',
         in_channels=[768],
@@ -40,10 +54,10 @@ model = dict(
         kernel_size=1,
         act_cfg=None),
     head=dict(
-        type='StarkHead',
+        type='VLStarkHead',
         num_querys=1,
         transformer=dict(
-            type='StarkTransformer',
+            type='VLStarkTransformer',
             encoder=dict(
                 type='mmdet.DetrTransformerEncoder',
                 num_layers=6,
@@ -136,8 +150,8 @@ train_pipeline = [
 
 # dataset settings
 train_dataloader = dict(
-    batch_size=1,
-    num_workers=1,
+    batch_size=24,
+    num_workers=8,
     persistent_workers=True,
     sampler=dict(type='QuotaSampler', samples_per_epoch=60000),
     dataset=dict(
@@ -190,7 +204,8 @@ optim_wrapper = dict(
     optimizer=dict(type='AdamW', lr=0.0001, weight_decay=0.0001),
     clip_grad=dict(max_norm=0.1, norm_type=2),
     paramwise_cfg=dict(
-        custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0))))
+        custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0), 
+                         text_encoder=dict(lr_mult=0.0))))
 
 # checkpoint saving
 default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=100))
