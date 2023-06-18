@@ -340,7 +340,7 @@ class Transformer(nn.Module):
         return x
 
 @MODELS.register_module()
-class VisionTransformer(BaseModule):
+class OSTrackViT(BaseModule):
     output_tokens: torch.jit.Final[bool]
 
     def __init__(
@@ -513,50 +513,63 @@ class VisionTransformer(BaseModule):
         else:
             return x[:, 0], x[:, 1:]
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
 
         # to patches - whether to use dual patchnorm - https://arxiv.org/abs/2302.01327v1
-        if self.input_patchnorm:
-            # einops - rearrange(x, 'b c (h p1) (w p2) -> b (h w) (c p1 p2)')
-            x = x.reshape(x.shape[0], x.shape[1], self.grid_size[0], self.patch_size[0], self.grid_size[1], self.patch_size[1])
-            x = x.permute(0, 2, 4, 1, 3, 5)
-            x = x.reshape(x.shape[0], self.grid_size[0] * self.grid_size[1], -1)
-            x = self.patchnorm_pre_ln(x)
-            x = self.conv1(x)
-        else:
-            assert x.shape[2] % self.patch_size[0] == 0 and x.shape[3] % self.patch_size[1] == 0 
-            x = self.conv1(x)  # shape = [*, width, grid, grid]
-            patch_H, patch_W = x.shape[2], x.shape[3]
-            x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
-            x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        assert x.shape[2] % self.patch_size[0] == 0 and x.shape[3] % self.patch_size[1] == 0 
+        assert z.shape[2] % self.patch_size[0] == 0 and z.shape[3] % self.patch_size[1] == 0
+        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        patch_H, patch_W = x.shape[2], x.shape[3]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        
+        z = self.conv1(z)  # shape = [*, width, grid, grid]
+        z_H, z_W = z.shape[2], z.shape[3]
+        z = z.reshape(z.shape[0], z.shape[1], -1)  # shape = [*, width, grid ** 2]
+        z = z.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         
         # If input size is smaller than the grid size, we interpolate the pos embedding to fit the input size
         if patch_H != self.grid_size[0] or patch_W != self.grid_size[1]:
             
-            new_pos_embed = self.positional_embedding[1:, :].reshape(1, self.grid_size[0], self.grid_size[1], -1)
-            new_pos_embed = new_pos_embed.permute(0, 3, 1, 2)
-            new_pos_embed = nn.functional.interpolate(new_pos_embed, size=(patch_H, patch_W), mode='bicubic',
+            x_pos_embed = self.positional_embedding[1:, :].reshape(1, self.grid_size[0], self.grid_size[1], -1)
+            x_pos_embed = x_pos_embed.permute(0, 3, 1, 2)
+            x_pos_embed = nn.functional.interpolate(x_pos_embed, size=(patch_H, patch_W), mode='bicubic',
                                                            align_corners=False)
-            new_pos_embed = new_pos_embed.permute(0, 2, 3, 1).reshape(patch_H * patch_W, self.width)
-            new_pos_embed = torch.cat([self.positional_embedding[0:1, :], new_pos_embed], dim=0)
+            x_pos_embed = x_pos_embed.permute(0, 2, 3, 1).reshape(patch_H * patch_W, self.width)
+            x_pos_embed = torch.cat([self.positional_embedding[0:1, :], x_pos_embed], dim=0)
             
         else:
-            new_pos_embed = self.positional_embedding
+            x_pos_embed = self.positional_embedding
+            
+        # Resize pos embed for template image as well
+        if z_H != self.grid_size[0] or z_W != self.grid_size[1]:
+            
+            z_pos_embed = self.positional_embedding[1:, :].reshape(1, self.grid_size[0], self.grid_size[1], -1)
+            z_pos_embed = z_pos_embed.permute(0, 3, 1, 2)
+            z_pos_embed = nn.functional.interpolate(z_pos_embed, size=(z_H, z_W), mode='bicubic',
+                                                              align_corners=False)
+            z_pos_embed = z_pos_embed.permute(0, 2, 3, 1).reshape(z_H * z_W, self.width)
+            # z_pos_embed = torch.cat([self.positional_embedding[-1:, :], z_pos_embed], dim=0)
+        
+        else:
+            z_pos_embed = self.positional_embedding
+        
+        x_pos_embed = torch.cat([x_pos_embed, z_pos_embed], dim=0)
             
         # class embeddings and positional embeddings
         x = torch.cat(
             [self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device),
-             x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+             x, z], dim=1)  # shape = [*, grid ** 2 + 1, width]
         
-        x = x + new_pos_embed.to(x.dtype)
+        x = x + x_pos_embed.to(x.dtype)
 
         # a patch_dropout of 0. would mean it is disabled and this function would do nothing but return what was passed in
         x = self.patch_dropout(x)
         x = self.ln_pre(x)
 
-        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = x.permute(1, 0, 2)  # N(1+L_x+L_z)D -> (1+L_x+L_z)ND
         x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
+        x = x.permute(1, 0, 2)  # (1+L_x+L_z)ND -> N(1+L_x+L_z)D
         
         return x
 
@@ -575,262 +588,3 @@ class VisionTransformer(BaseModule):
         #     return pooled, tokens
         
         # return pooled
-
-@MODELS.register_module()
-class TextTransformer(BaseModule):
-    output_tokens: torch.jit.Final[bool]
-
-    def __init__(
-            self,
-            context_length: int = 77,
-            vocab_size: int = 49408,
-            width: int = 512,
-            heads: int = 8,
-            layers: int = 12,
-            ls_init_value: float = None,
-            output_dim: int = 512,
-            act_layer: Callable = nn.GELU,
-            norm_layer: Callable = LayerNorm,
-            embed_cls: bool = False,
-            pad_id: int = 0,
-            output_tokens: bool = False,
-            init_cfg: Optional[dict] = None
-    ):
-        super().__init__()
-        self.output_tokens = output_tokens
-        self.num_pos = self.context_length = context_length
-        self.vocab_size = vocab_size
-        self.width = width
-        self.output_dim = output_dim
-        self.heads = heads
-        self.pad_id = pad_id
-
-        self.init_cfg = init_cfg
-        self.text_projection = nn.Parameter(torch.empty(width, output_dim))
-        
-        self.logger = MMLogger.get_current_instance()
-
-        if embed_cls:
-            self.cls_emb = nn.Parameter(torch.empty(width))
-            self.num_pos += 1
-        else:
-            self.cls_emb = None
-
-        self.token_embedding = nn.Embedding(vocab_size, width)
-        self.positional_embedding = nn.Parameter(torch.empty(self.num_pos, width))
-        self.transformer = Transformer(
-            width=width,
-            layers=layers,
-            heads=heads,
-            ls_init_value=ls_init_value,
-            act_layer=act_layer,
-            norm_layer=norm_layer,
-        )
-        self.ln_final = norm_layer(width)
-
-        self.register_buffer('attn_mask', self.build_attention_mask(), persistent=False)
-
-        self.init_parameters()
-        
-    def check_mismatch(self, ckpt):
-        
-        # Load the state dictionary into the model
-        all_param_names = []
-        for name, param in self.named_parameters():
-            all_param_names.append(name)
-            if name in ckpt:
-                if param.data.shape != ckpt[name].shape:
-                    self.logger.info(f"Init Weight ({self.__class__.__name__}): Size mismatch: " + name)
-            else:
-                self.logger.info(f"Init Weight ({self.__class__.__name__}): Name mismatch: " + name)
-        
-        all_param_names = set(all_param_names)
-        
-        for name, param in ckpt.items():
-            if name in all_param_names:
-                if param.data.shape != ckpt[name].shape:
-                    self.logger.info(f"Init Weight ({self.__class__.__name__}): Size mismatch: " + name)
-            else:
-                self.logger.info(f"Init Weight ({self.__class__.__name__}): Unused Parameter in pretrained model: " + name)
-        
-    def init_weights(self):
-        
-        if self.init_cfg is not None and self.init_cfg.type == "Pretrained":
-            ckpt = torch.load(self.init_cfg.checkpoint)
-            self.load_state_dict(ckpt, strict=False)
-            
-            self.check_mismatch(ckpt)
-            
-        else:
-            self.init_parameters()
-
-    def init_parameters(self):
-        nn.init.normal_(self.token_embedding.weight, std=0.02)
-        nn.init.normal_(self.positional_embedding, std=0.01)
-        if self.cls_emb is not None:
-            nn.init.normal_(self.cls_emb, std=0.01)
-
-        proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-        attn_std = self.transformer.width ** -0.5
-        fc_std = (2 * self.transformer.width) ** -0.5
-        for block in self.transformer.resblocks:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-
-        if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
-
-    @torch.jit.ignore
-    def set_grad_checkpointing(self, enable=True):
-        self.transformer.grad_checkpointing = enable
-
-    def build_attention_mask(self):
-        # lazily create causal attention mask, with full attention between the tokens
-        # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.num_pos, self.num_pos)
-        mask.fill_(float("-inf"))
-        mask.triu_(1)  # zero out the lower diagonal
-        return mask
-
-    def build_cls_mask(self, text, cast_dtype: torch.dtype):
-        cls_mask = (text != self.pad_id).unsqueeze(1)
-        cls_mask = F.pad(cls_mask, (1, 0, cls_mask.shape[2], 0), value=1.0)
-        additive_mask = torch.empty(cls_mask.shape, dtype=cast_dtype, device=cls_mask.device)
-        additive_mask.fill_(0)
-        additive_mask.masked_fill_(~cls_mask, float("-inf"))
-        additive_mask = torch.repeat_interleave(additive_mask, self.heads, 0)
-        return additive_mask
-
-    def _repeat(self, t, N: int):
-        return t.reshape(1, 1, -1).repeat(N, 1, 1)
-
-    def forward(self, text):
-        cast_dtype = self.transformer.get_cast_dtype()
-        seq_len = text.shape[1]
-
-        x = self.token_embedding(text).to(cast_dtype)  # [batch_size, n_ctx, d_model]
-        attn_mask = self.attn_mask
-        if self.cls_emb is not None:
-            seq_len += 1
-            x = torch.cat([x, self._repeat(self.cls_emb, x.shape[0])], dim=1)
-            cls_mask = self.build_cls_mask(text, cast_dtype)
-            attn_mask = attn_mask[None, :seq_len, :seq_len] + cls_mask[:, :seq_len, :seq_len]
-
-        x = x + self.positional_embedding[:seq_len].to(cast_dtype)
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x, attn_mask=attn_mask)
-        x = x.permute(1, 0, 2)  # LND -> NLD
-
-        # x.shape = [batch_size, n_ctx, transformer.width]
-        # take features from the eot embedding (eot_token is the highest number in each sequence)
-        if self.cls_emb is not None:
-            pooled, tokens = x[:, -1], x[:, :-1]
-            pooled = self.ln_final(pooled)
-        else:
-            x = self.ln_final(x)
-            pooled, tokens = x[torch.arange(x.shape[0]), text.argmax(dim=-1)], x
-
-        if self.text_projection is not None:
-            pooled = pooled @ self.text_projection
-
-        if self.output_tokens:
-            return pooled, tokens
-
-        return pooled
-
-
-class MultimodalTransformer(Transformer):
-    def __init__(
-            self,
-            width: int,
-            layers: int,
-            heads: int,
-            context_length: int = 77,
-            mlp_ratio: float = 4.0,
-            ls_init_value: float = None,
-            act_layer: Callable = nn.GELU,
-            norm_layer: Callable = LayerNorm,
-            output_dim: int = 512,
-    ):
-
-        super().__init__(
-            width=width,
-            layers=layers,
-            heads=heads,
-            mlp_ratio=mlp_ratio,
-            ls_init_value=ls_init_value,
-            act_layer=act_layer,
-            norm_layer=norm_layer,
-        )
-        self.context_length = context_length
-        self.cross_attn = nn.ModuleList([
-            ResidualAttentionBlock(
-                width,
-                heads,
-                mlp_ratio,
-                ls_init_value=ls_init_value,
-                act_layer=act_layer,
-                norm_layer=norm_layer,
-                is_cross_attention=True,
-            )
-            for _ in range(layers)
-        ])
-
-        self.register_buffer('attn_mask', self.build_attention_mask(), persistent=False)
-
-        self.ln_final = norm_layer(width)
-        self.text_projection = nn.Parameter(torch.empty(width, output_dim))
-
-    def init_parameters(self):
-        proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-        attn_std = self.transformer.width ** -0.5
-        fc_std = (2 * self.transformer.width) ** -0.5
-        for block in self.transformer.resblocks:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-        for block in self.transformer.cross_attn:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-
-        if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
-
-    def build_attention_mask(self):
-        # lazily create causal attention mask, with full attention between the tokens
-        # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.context_length, self.context_length)
-        mask.fill_(float("-inf"))
-        mask.triu_(1)  # zero out the lower diagonal
-        return mask
-
-    def forward(self, image_embs, text_embs):
-        text_embs = text_embs.permute(1, 0, 2)  # NLD -> LNDsq
-        image_embs = image_embs.permute(1, 0, 2)  # NLD -> LND
-        seq_len = text_embs.shape[0]
-
-        for resblock, cross_attn in zip(self.resblocks, self.cross_attn):
-            if self.grad_checkpointing and not torch.jit.is_scripting():
-                # TODO: handle kwargs https://github.com/pytorch/pytorch/issues/79887#issuecomment-1161758372
-                text_embs = checkpoint(resblock, text_embs, None, None, self.attn_mask[:seq_len, :seq_len])
-                text_embs = checkpoint(cross_attn, text_embs, image_embs, image_embs, None)
-            else:
-                text_embs = resblock(text_embs, attn_mask=self.attn_mask[:seq_len, :seq_len])
-                text_embs = cross_attn(text_embs, k_x=image_embs, v_x=image_embs)
-
-        x = text_embs.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x)
-
-        if self.text_projection is not None:
-            x = x @ self.text_projection
-
-        return x
-
-    @torch.jit.ignore
-    def set_grad_checkpointing(self, enable=True):
-        self.grad_checkpointing = enable

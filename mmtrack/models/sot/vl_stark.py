@@ -86,6 +86,9 @@ class VLStark(BaseSingleObjectTracker):
         # in Pytorch.
         if self.with_backbone:
             self.backbone.init_weights()
+            
+        if self.text_encoder is not None:
+            self.text_encoder.init_weights()
 
         if self.with_neck:
             for m in self.neck.modules():

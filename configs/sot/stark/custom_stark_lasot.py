@@ -150,7 +150,7 @@ train_pipeline = [
 
 # dataset settings
 train_dataloader = dict(
-    batch_size=24,
+    batch_size=16,
     num_workers=8,
     persistent_workers=True,
     sampler=dict(type='QuotaSampler', samples_per_epoch=60000),
@@ -193,7 +193,7 @@ train_dataloader = dict(
 
 # runner loop
 train_cfg = dict(
-    type='EpochBasedTrainLoop', max_epochs=500, val_begin=500, val_interval=1)
+    type='EpochBasedTrainLoop', max_epochs=100, val_begin=500, val_interval=1)
 
 # learning policy
 param_scheduler = dict(type='MultiStepLR', milestones=[400], gamma=0.1)
@@ -208,4 +208,4 @@ optim_wrapper = dict(
                          text_encoder=dict(lr_mult=0.0))))
 
 # checkpoint saving
-default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=100))
+default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=1))

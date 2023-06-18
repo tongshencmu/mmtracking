@@ -12,7 +12,6 @@ from mmengine.fileio.file_client import FileClient
 
 from mmtrack.registry import DATASETS
 
-
 @DATASETS.register_module()
 class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
     """Base dataset for SOT task. The dataset can both support training and
@@ -177,10 +176,13 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
     def get_nlp_from_video(self, video_idx):
         
         meta_video_info = self.get_data_info(video_idx)
-        nlp_path = osp.join(self.data_prefix['img_path'],
-                             meta_video_info['nlp_path'])
-        with open (nlp_path, "r") as myfile:
-            nlp_data = myfile.read()
+        nlp_data = None
+        if 'nlp_path' in meta_video_info:
+            nlp_path = osp.join(self.data_prefix['img_path'],
+                                meta_video_info['nlp_path'])
+
+            with open (nlp_path, "r") as myfile:
+                nlp_data = myfile.read()
             
         return nlp_data
         
@@ -269,13 +271,15 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
             img_infos = self.get_img_infos_from_video(video_idx)
             
             video_infos = dict(**img_infos, **ann_infos)
-            # video_infos['nlp'] = nlp_infos
             pair_video_infos.append(video_infos)
 
         results = self.pipeline(pair_video_infos)
         
         nlp_infos = self.get_nlp_from_video(video_idxes[0])
-        results['data_samples'].nlp = nlp_infos
+        if results is None:
+            print(video_idxes[0], nlp_infos)
+        else:
+            results['data_samples'].nlp = nlp_infos
         
         return results
 

@@ -4,7 +4,7 @@
 #SBATCH --partition=GPU-shared
 #SBATCH --ntasks-per-node 8
 #SBATCH --gres=gpu:v100-32:4
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --dependency=singleton
 
 module load anaconda3
