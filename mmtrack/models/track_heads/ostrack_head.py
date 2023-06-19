@@ -245,6 +245,7 @@ class OSTrackHead(BaseModule):
 
         assert pred_bboxes is not None
         img_shape = batch_img_metas[0]['search_img_shape']
+        pred_bboxes_normed = pred_bboxes.clone()
         # pred_bboxes[:, 0:4:2] = pred_bboxes[:, 0:4:2] / float(img_shape[1])
         # pred_bboxes[:, 1:4:2] = pred_bboxes[:, 1:4:2] / float(img_shape[0])
 
@@ -252,27 +253,27 @@ class OSTrackHead(BaseModule):
             instance['bboxes'] for instance in batch_search_gt_instances
         ]
         gt_bboxes = torch.cat(gt_bboxes, dim=0).type(torch.float32)
-        gt_bboxes[:, 0:4:2] = gt_bboxes[:, 0:4:2] / float(img_shape[1])
-        gt_bboxes[:, 1:4:2] = gt_bboxes[:, 1:4:2] / float(img_shape[0])
-        gt_bboxes = gt_bboxes.clamp(0., 1.)
+        gt_bboxes_normed[:, 0:4:2] = gt_bboxes[:, 0:4:2] / float(img_shape[1])
+        gt_bboxes_normed[:, 1:4:2] = gt_bboxes[:, 1:4:2] / float(img_shape[0])
+        gt_bboxes_normed = gt_bboxes_normed.clamp(0., 1.)
 
         # regression IoU loss, default GIoU loss
-        if (pred_bboxes[:, :2] >= pred_bboxes[:, 2:]).any() or (
-                gt_bboxes[:, :2] >= gt_bboxes[:, 2:]).any():
+        if (pred_bboxes_normed[:, :2] >= pred_bboxes_normed[:, 2:]).any() or (
+                pred_bboxes_normed[:, :2] >= pred_bboxes_normed[:, 2:]).any():
             # the first several iterations of train may return invalid
             # bbox coordinates.
-            losses['loss_iou'] = (pred_bboxes - gt_bboxes).sum() * 0.0
+            losses['loss_iou'] = (pred_bboxes_normed - gt_bboxes_normed).sum() * 0.0
         else:
-            losses['loss_iou'] = self.loss_iou(pred_bboxes, gt_bboxes)
+            losses['loss_iou'] = self.loss_iou(pred_bboxes_normed, gt_bboxes_normed)
         # regression L1 loss
-        losses['loss_bbox'] = self.loss_bbox(pred_bboxes, gt_bboxes)
+        losses['loss_bbox'] = self.loss_bbox(pred_bboxes_normed, gt_bboxes_normed)
         
         # Add focal loss to gaussian heatmap
         gt_bboxes_xywh = gt_bboxes.clone()
         gt_bboxes_xywh[:, 2:] = gt_bboxes_xywh[:, 2:] - gt_bboxes_xywh[:, :2]
         
-        gt_gaussian_map = generate_heatmap(gt_bboxes_xywh.unsqueeze(1), img_shape[0], self.bbox_head.stride)
-        losses['loss_focal'] = self.loss_focal(score_map_ctr, gt_gaussian_map)
+        gt_gaussian_map = generate_heatmap(gt_bboxes_xywh.unsqueeze(0), img_shape[0], self.bbox_head.stride)
+        losses['loss_focal'] = self.loss_focal(score_map_ctr.squeeze(1), gt_gaussian_map[0])
 
         return losses
 

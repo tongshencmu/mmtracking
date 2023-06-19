@@ -76,8 +76,8 @@ train_pipeline = [
         ]),
     dict(
         type='SeqBboxJitter',
-        center_jitter_factor=[3, 3, 4.5],
-        scale_jitter_factor=[0.25, 0.25, 0.5],
+        center_jitter_factor=[0, 0, 4.5],
+        scale_jitter_factor=[0, 0, 0.5],
         crop_size_factor=[2, 2, 5]),
     dict(
         type='SeqCropLikeStark',
@@ -92,8 +92,9 @@ train_pipeline = [
 ]
 
 # dataset settings
+batch_size=24
 train_dataloader = dict(
-    batch_size=24,
+    batch_size=batch_size,
     num_workers=4,
     persistent_workers=True,
     sampler=dict(type='QuotaSampler', samples_per_epoch=60000),
@@ -136,19 +137,21 @@ train_dataloader = dict(
 
 # runner loop
 train_cfg = dict(
-    type='EpochBasedTrainLoop', max_epochs=100, val_begin=100, val_interval=1)
+    type='EpochBasedTrainLoop', max_epochs=300, val_begin=300, val_interval=1)
 
 # learning policy
-param_scheduler = dict(type='MultiStepLR', milestones=[400], gamma=0.1)
+param_scheduler = dict(type='MultiStepLR', milestones=[240], gamma=0.1)
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(type='AdamW', lr=0.0001, weight_decay=0.0001),
     clip_grad=dict(max_norm=0.1, norm_type=2),
-    # paramwise_cfg=dict(
-    #     custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0)))
+    paramwise_cfg=dict(
+        custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0)))
     )
 
 # checkpoint saving
 default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=1))
+
+auto_scale_lr = dict(enable=True, base_batch_size=batch_size)

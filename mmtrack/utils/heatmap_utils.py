@@ -23,7 +23,7 @@ def generate_heatmap(bboxes, patch_size=320, stride=16):
         centers_int = (bbox[:, :2] + wh / 2).round()
         CenterNetHeatMap.generate_score_map(gt_scoremap, classes, wh, centers_int, 0.7)
         gaussian_maps.append(gt_scoremap.to(bbox.device))
-    return torch.stack(gaussian_maps)
+    return gaussian_maps
 
 
 class CenterNetHeatMap(object):
