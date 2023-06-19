@@ -11,10 +11,12 @@ from .stark_head import CornerPredictorHead, StarkHead
 from .sam_transformer import TwoWayTransformer
 from .multimodal_head import MultiModalFusionHead
 from .stark_vl_head import VLStarkHead, VLStarkTransformer
+from .ostrack_head import OSTrackHead, CenterPredictHead
 
 __all__ = [
     'CorrelationHead', 'SiameseRPNHead', 'RoIEmbedHead', 'RoITrackHead',
     'StarkHead', 'CornerPredictorHead', 'QuasiDenseEmbedHead',
     'QuasiDenseTrackHead', 'PrDiMPClsHead', 'IouNetHead', 'Mask2FormerHead', 
-    'TwoWayTransformer', 'MultiModalFusionHead', 'VLStarkHead', 'VLStarkTransformer'
+    'TwoWayTransformer', 'MultiModalFusionHead', 'VLStarkHead', 'VLStarkTransformer', 
+    'OSTrackHead', 'CenterPredictHead'
 ]

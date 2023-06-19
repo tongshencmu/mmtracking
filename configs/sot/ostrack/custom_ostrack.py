@@ -4,7 +4,7 @@ randomness = dict(seed=1, deterministic=False)
 
 # model settings
 model = dict(
-    type='Stark',
+    type='OSTrack',
     data_preprocessor=dict(
         type='TrackDataPreprocessor',
         mean=[123.675, 116.28, 103.53],
@@ -22,7 +22,7 @@ model = dict(
     #     norm_cfg=dict(type='BN', requires_grad=False),
     #     init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
     backbone=dict(
-        type='VisionTransformer',
+        type='OSTrackViT',
         image_size=224,
         patch_size=16,
         width=768,
@@ -33,63 +33,22 @@ model = dict(
             type='Pretrained', 
             checkpoint='/ocean/projects/ele220002p/tongshen/code/vl_tracking/vit-b-16-laion-2b_visual.pth')
     ),
-    neck=dict(
-        type='mmdet.ChannelMapper',
-        in_channels=[768],
-        out_channels=256,
-        kernel_size=1,
-        act_cfg=None),
+    # neck=dict(
+    #     type='mmdet.ChannelMapper',
+    #     in_channels=[768],
+    #     out_channels=256,
+    #     kernel_size=1,
+    #     act_cfg=None),
     head=dict(
-        type='StarkHead',
-        num_querys=1,
-        transformer=dict(
-            type='StarkTransformer',
-            encoder=dict(
-                type='mmdet.DetrTransformerEncoder',
-                num_layers=6,
-                transformerlayers=dict(
-                    type='BaseTransformerLayer',
-                    attn_cfgs=[
-                        dict(
-                            type='MultiheadAttention',
-                            embed_dims=256,
-                            num_heads=8,
-                            attn_drop=0.1,
-                            dropout_layer=dict(type='Dropout', drop_prob=0.1))
-                    ],
-                    ffn_cfgs=dict(
-                        feedforward_channels=2048,
-                        embed_dims=256,
-                        ffn_drop=0.1),
-                    operation_order=('self_attn', 'norm', 'ffn', 'norm'))),
-            decoder=dict(
-                type='mmdet.DetrTransformerDecoder',
-                return_intermediate=False,
-                num_layers=6,
-                transformerlayers=dict(
-                    type='BaseTransformerLayer',
-                    attn_cfgs=dict(
-                        type='MultiheadAttention',
-                        embed_dims=256,
-                        num_heads=8,
-                        attn_drop=0.1,
-                        dropout_layer=dict(type='Dropout', drop_prob=0.1)),
-                    ffn_cfgs=dict(
-                        feedforward_channels=2048,
-                        embed_dims=256,
-                        ffn_drop=0.1),
-                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
-                                     'ffn', 'norm'))),
-        ),
-        positional_encoding=dict(
-            type='mmdet.SinePositionalEncoding', num_feats=128,
-            normalize=True),
+        type='OSTrackHead',
+        feat_sz=20,
         bbox_head=dict(
-            type='CornerPredictorHead',
-            inplanes=256,
+            type='CenterPredictHead',
+            inplanes=768,
             channel=256,
-            feat_size=20,
+            feat_sz=20,
             stride=16),
+        loss_cls=dict(type='FocalLoss'),
         loss_bbox=dict(type='mmdet.L1Loss', loss_weight=5.0),
         loss_iou=dict(type='mmdet.GIoULoss', loss_weight=2.0)),
     test_cfg=dict(
@@ -102,12 +61,10 @@ model = dict(
 data_root = '/ocean/projects/ele220002p/tongshen/dataset/'
 train_pipeline = [
     dict(
-        type='TridentSampling',
+        type='DiMPSampling',
         num_search_frames=1,
         num_template_frames=2,
-        max_frame_range=[200],
-        cls_pos_prob=0.5,
-        train_cls_head=False),
+        max_frame_range=200),
     dict(
         type='TransformBroadcaster',
         share_random_params=True,
@@ -119,8 +76,8 @@ train_pipeline = [
         ]),
     dict(
         type='SeqBboxJitter',
-        center_jitter_factor=[0, 0, 4.5],
-        scale_jitter_factor=[0, 0, 0.5],
+        center_jitter_factor=[3, 3, 4.5],
+        scale_jitter_factor=[0.25, 0.25, 0.5],
         crop_size_factor=[2, 2, 5]),
     dict(
         type='SeqCropLikeStark',
@@ -136,7 +93,7 @@ train_pipeline = [
 
 # dataset settings
 train_dataloader = dict(
-    batch_size=16,
+    batch_size=24,
     num_workers=4,
     persistent_workers=True,
     sampler=dict(type='QuotaSampler', samples_per_epoch=60000),
@@ -179,7 +136,7 @@ train_dataloader = dict(
 
 # runner loop
 train_cfg = dict(
-    type='EpochBasedTrainLoop', max_epochs=500, val_begin=500, val_interval=1)
+    type='EpochBasedTrainLoop', max_epochs=100, val_begin=100, val_interval=1)
 
 # learning policy
 param_scheduler = dict(type='MultiStepLR', milestones=[400], gamma=0.1)
@@ -189,8 +146,9 @@ optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(type='AdamW', lr=0.0001, weight_decay=0.0001),
     clip_grad=dict(max_norm=0.1, norm_type=2),
-    paramwise_cfg=dict(
-        custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0))))
+    # paramwise_cfg=dict(
+    #     custom_keys=dict(backbone=dict(lr_mult=0.1, decay_mult=1.0)))
+    )
 
 # checkpoint saving
-default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=100))
+default_hooks = dict(checkpoint=dict(type='CheckpointHook', interval=1))

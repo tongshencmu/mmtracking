@@ -14,8 +14,10 @@ from torch import Tensor, nn
 from mmtrack.registry import MODELS
 from mmtrack.utils import InstanceList, OptConfigType, SampleList, generate_heatmap
 
+from mmdet.structures.bbox import bbox_cxcywh_to_xyxy
+
 @MODELS.register_module()
-class CenterPredictor(BaseModule):
+class CenterPredictHead(BaseModule):
     
     def __init__(self, 
                  inplanes=64, 
@@ -24,7 +26,7 @@ class CenterPredictor(BaseModule):
                  stride=16, 
                  freeze_bn=False):
         
-        super(CenterPredictor, self).__init__()
+        super(CenterPredictHead, self).__init__()
         
         self.feat_sz = feat_sz
         self.stride = stride
@@ -72,9 +74,9 @@ class CenterPredictor(BaseModule):
         
         score_map_ctr, score_map_size, score_map_offset = self.get_score_map(x)
         
-        bbox = self.cal_bbox(score_map_ctr, score_map_size, score_map_offset)
+        bbox_xyxy = self.cal_bbox(score_map_ctr, score_map_size, score_map_offset)
         
-        return score_map_ctr, bbox
+        return score_map_ctr, bbox_xyxy
     
     def cal_bbox(self, score_map_ctr, size_map, offset_map, return_score=False):
         
@@ -89,13 +91,15 @@ class CenterPredictor(BaseModule):
         # bbox = torch.cat([idx_x - size[:, 0] / 2, idx_y - size[:, 1] / 2,
         #                   idx_x + size[:, 0] / 2, idx_y + size[:, 1] / 2], dim=1) / self.feat_sz
         # cx, cy, w, h
-        bbox = torch.cat([(idx_x.to(torch.float) + offset[:, :1]) / self.feat_sz,
+        bbox_cxcywh = torch.cat([(idx_x.to(torch.float) + offset[:, :1]) / self.feat_sz,
                           (idx_y.to(torch.float) + offset[:, 1:]) / self.feat_sz,
                           size.squeeze(-1)], dim=1)
+        
+        bbox_xyxy = bbox_cxcywh_to_xyxy(bbox_cxcywh)
 
         if return_score:
-            return bbox, max_score
-        return bbox
+            return bbox_xyxy, max_score
+        return bbox_xyxy
     
     def get_score_map(self, x):
         
@@ -120,6 +124,7 @@ class OSTrackHead(BaseModule):
     
     def __init__(self, 
                  bbox_head=None,
+                 feat_sz=20,
                  loss_cls=None,
                  loss_bbox=dict(type='L1Loss', loss_weight=5.0),
                  loss_iou=dict(type='GIoULoss', loss_weight=2.0),
@@ -149,6 +154,8 @@ class OSTrackHead(BaseModule):
         super(OSTrackHead, self).__init__()
         
         assert bbox_head is not None
+        
+        self.feat_sz = feat_sz
         self.bbox_head = MODELS.build(bbox_head)
 
         self.loss_bbox = MODELS.build(loss_bbox)
@@ -238,8 +245,8 @@ class OSTrackHead(BaseModule):
 
         assert pred_bboxes is not None
         img_shape = batch_img_metas[0]['search_img_shape']
-        pred_bboxes[:, 0:4:2] = pred_bboxes[:, 0:4:2] / float(img_shape[1])
-        pred_bboxes[:, 1:4:2] = pred_bboxes[:, 1:4:2] / float(img_shape[0])
+        # pred_bboxes[:, 0:4:2] = pred_bboxes[:, 0:4:2] / float(img_shape[1])
+        # pred_bboxes[:, 1:4:2] = pred_bboxes[:, 1:4:2] / float(img_shape[0])
 
         gt_bboxes = [
             instance['bboxes'] for instance in batch_search_gt_instances
@@ -261,8 +268,11 @@ class OSTrackHead(BaseModule):
         losses['loss_bbox'] = self.loss_bbox(pred_bboxes, gt_bboxes)
         
         # Add focal loss to gaussian heatmap
-        gt_gaussian_map = generate_heatmap(gt_bboxes, img_shape, self.stride)
-        losses['focal'] = self.loss_focal(score_map_ctr, gt_gaussian_map)
+        gt_bboxes_xywh = gt_bboxes.clone()
+        gt_bboxes_xywh[:, 2:] = gt_bboxes_xywh[:, 2:] - gt_bboxes_xywh[:, :2]
+        
+        gt_gaussian_map = generate_heatmap(gt_bboxes_xywh.unsqueeze(1), img_shape[0], self.bbox_head.stride)
+        losses['loss_focal'] = self.loss_focal(score_map_ctr, gt_gaussian_map)
 
         return losses
 

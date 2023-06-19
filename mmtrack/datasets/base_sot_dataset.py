@@ -277,7 +277,8 @@ class BaseSOTDataset(BaseDataset, metaclass=ABCMeta):
         
         nlp_infos = self.get_nlp_from_video(video_idxes[0])
         if results is None:
-            print(video_idxes[0], nlp_infos)
+            a = 1
+            # print(video_idxes[0], nlp_infos)
         else:
             results['data_samples'].nlp = nlp_infos
         

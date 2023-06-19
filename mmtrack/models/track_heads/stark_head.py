@@ -72,6 +72,7 @@ class CornerPredictorHead(BaseModule):
         Returns:
             (Tensor): bbox of shape (bs, 4) in (tl_x, tl_y, br_x, br_y) format.
         """
+        # 20x20
         score_map_tl, score_map_br = self.get_score_map(x)
         coorx_tl, coory_tl = self.soft_argmax(score_map_tl)
         coorx_br, coory_br = self.soft_argmax(score_map_br)

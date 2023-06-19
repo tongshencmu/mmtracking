@@ -2,5 +2,6 @@
 from .sot_resnet import SOTResNet
 from .transformer import TextTransformer, VisionTransformer
 from .tokenizer import SimpleTokenizer, HFTokenizer
+from .ostrack import OSTrackViT
 
-__all__ = ['SOTResNet', 'VisionTransformer', 'TextTransformer', 'SimpleTokenizer', 'HFTokenizer']
+__all__ = ['SOTResNet', 'VisionTransformer', 'TextTransformer', 'SimpleTokenizer', 'HFTokenizer', 'OSTrackViT']

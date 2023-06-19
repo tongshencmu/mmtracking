@@ -40,7 +40,6 @@ class OSTrack(BaseSingleObjectTracker):
 
     def __init__(self,
                  backbone: dict,
-                 neck: Optional[dict] = None,
                  head: Optional[dict] = None,
                  pretrains: Optional[dict] = None,
                  train_cfg: Optional[dict] = None,
@@ -52,7 +51,6 @@ class OSTrack(BaseSingleObjectTracker):
         super(OSTrack, self).__init__(data_preprocessor, init_cfg)
         # head.update(test_cfg=test_cfg)
         self.backbone = MODELS.build(backbone)
-        self.neck = MODELS.build(neck)
         self.head = MODELS.build(head)
         
         self.head_feat_sz = self.head.feat_sz
@@ -143,11 +141,164 @@ class OSTrack(BaseSingleObjectTracker):
         template_img = inputs['img']
         assert template_img.dim(
         ) == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
-
+        
+        search_img = search_img[:, 0]
+        template_img = template_img[:, 0]
         feat = self.backbone(search_img, template_img)
-        search_feat = feat[0, 1:(self.head_feat_sz * self.head_feat_sz +1), :].permute(0, 2, 1)
+        search_feat = feat[:, 1:(self.head_feat_sz * self.head_feat_sz + 1), :].permute(0, 2, 1)
         search_feat = search_feat.reshape(search_feat.shape[0], -1, self.head_feat_sz, self.head_feat_sz)
 
         losses = self.head.loss(search_feat, data_samples)
 
         return losses
+
+    def get_cropped_img(self, img: Tensor, target_bbox: Tensor,
+                        search_area_factor: float,
+                        output_size: float) -> Union[Tensor, float, Tensor]:
+        """ Crop Image
+        Only used during testing
+        This function mainly contains two steps:
+        1. Crop `img` based on target_bbox and search_area_factor. If the
+        cropped image/mask is out of boundary of `img`, use 0 to pad.
+        2. Resize the cropped image/mask to `output_size`.
+
+        args:
+            img (Tensor): of shape (1, C, H, W)
+            target_bbox (Tensor): in [cx, cy, w, h] format
+            search_area_factor (float): Ratio of crop size to target size.
+            output_size (float): the size of output cropped image
+                (always square).
+        returns:
+            img_crop_padded (Tensor): of shape (1, C, output_size, output_size)
+            resize_factor (float): the ratio of original image scale to cropped
+                image scale.
+            pdding_mask (Tensor): the padding mask caused by cropping. It's
+                of shape (1, output_size, output_size).
+        """
+        cx, cy, w, h = target_bbox.split((1, 1, 1, 1), dim=-1)
+
+        img_h, img_w = img.shape[2:]
+        # 1. Crop image
+        # 1.1 calculate crop size and pad size
+        crop_size = math.ceil(math.sqrt(w * h) * search_area_factor)
+        if crop_size < 1:
+            raise Exception('Too small bounding box.')
+
+        x1 = torch.round(cx - crop_size * 0.5).long()
+        x2 = x1 + crop_size
+        y1 = torch.round(cy - crop_size * 0.5).long()
+        y2 = y1 + crop_size
+
+        x1_pad = max(0, -x1)
+        x2_pad = max(x2 - img_w + 1, 0)
+        y1_pad = max(0, -y1)
+        y2_pad = max(y2 - img_h + 1, 0)
+
+        # 1.2 crop image
+        img_crop = img[..., y1 + y1_pad:y2 - y2_pad, x1 + x1_pad:x2 - x2_pad]
+
+        # 1.3 pad image
+        img_crop_padded = F.pad(
+            img_crop,
+            pad=(x1_pad, x2_pad, y1_pad, y2_pad),
+            mode='constant',
+            value=0)
+        # 1.4 generate padding mask
+        _, _, img_h, img_w = img_crop_padded.shape
+        end_x = None if x2_pad == 0 else -x2_pad
+        end_y = None if y2_pad == 0 else -y2_pad
+        padding_mask = torch.ones((img_h, img_w),
+                                  dtype=torch.float32,
+                                  device=img.device)
+        padding_mask[y1_pad:end_y, x1_pad:end_x] = 0.
+
+        # 2. Resize cropped image and padding mask
+        resize_factor = output_size / crop_size
+        img_crop_padded = F.interpolate(
+            img_crop_padded, (output_size, output_size),
+            mode='bilinear',
+            align_corners=False)
+
+        padding_mask = F.interpolate(
+            padding_mask[None, None], (output_size, output_size),
+            mode='bilinear',
+            align_corners=False).squeeze(dim=0).type(torch.bool)
+
+        return img_crop_padded, resize_factor, padding_mask
+
+    def init(self, img: Tensor):
+        """Initialize the single object tracker in the first frame.
+
+        Args:
+            img (Tensor): input image of shape (1, C, H, W).
+        """
+        self.memo.z_dict_list = []  # store templates
+        # get the 1st template
+        z_patch, _, z_mask = self.get_cropped_img(
+            img, self.memo.bbox, self.test_cfg['template_factor'],
+            self.test_cfg['template_size']
+        )  # z_patch of shape [1,C,H,W];  z_mask of shape [1,H,W]
+
+        z_feat = self.extract_feat(z_patch)
+
+        self.z_dict = dict(feat=z_feat, mask=z_mask)
+        self.memo.z_dict_list.append(self.z_dict)
+
+        # get other templates
+        for _ in range(self.num_templates - 1):
+            self.memo.z_dict_list.append(deepcopy(self.z_dict))
+
+    def update_template(self, img: Tensor, bbox: Union[List, Tensor],
+                        conf_score: float):
+        """Update the dymanic templates.
+
+        Args:
+            img (Tensor): of shape (1, C, H, W).
+            bbox (list | Tensor): in [cx, cy, w, h] format.
+            conf_score (float): the confidence score of the predicted bbox.
+        """
+        for i, update_interval in enumerate(self.update_intervals):
+            if self.memo.frame_id % update_interval == 0 and conf_score > 0.5:
+                z_patch, _, z_mask = self.get_cropped_img(
+                    img,
+                    bbox,
+                    self.test_cfg['template_factor'],
+                    output_size=self.test_cfg['template_size'])
+                z_feat = self.extract_feat(z_patch)
+                # the 1st element of z_dict_list is the template from the 1st
+                # frame
+                self.memo.z_dict_list[i + 1] = dict(feat=z_feat, mask=z_mask)
+
+    def track(self, img: Tensor, data_samples: SampleList) -> InstanceList:
+        """Track the box of previous frame to current frame `img`.
+
+        Args:
+            img (Tensor): of shape (1, C, H, W).
+            data_samples (list[:obj:`TrackDataSample`]): The batch
+                data samples. It usually includes information such
+                as ``gt_instances`` and 'metainfo'.
+
+        Returns:
+            InstanceList: Tracking results of each image after the postprocess.
+                - scores: a Tensor denoting the score of best_bbox.
+                - bboxes: a Tensor of shape (4, ) in [x1, x2, y1, y2]
+                format, and denotes the best tracked bbox in current frame.
+        """
+        # get the search patches
+        x_patch, resize_factor, x_mask = self.get_cropped_img(
+            img, self.memo.bbox, self.test_cfg['search_factor'],
+            self.test_cfg['search_size']
+        )  # bbox: of shape (x1, y1, w, h), x_mask: of shape (1, h, w)
+
+        x_feat = self.extract_feat(x_patch)
+        x_dict = dict(feat=x_feat, mask=x_mask)
+        head_inputs = self.memo.z_dict_list + [x_dict]
+        results = self.head.predict(head_inputs, data_samples, self.memo.bbox,
+                                    resize_factor)
+
+        if results[0].scores.item() != -1:
+            # get confidence score (whether the search region is reliable)
+            crop_bbox = bbox_xyxy_to_cxcywh(results[0].bboxes.squeeze())
+            self.update_template(img, crop_bbox, results[0].scores.item())
+
+        return results
