@@ -253,6 +253,7 @@ class OSTrackHead(BaseModule):
             instance['bboxes'] for instance in batch_search_gt_instances
         ]
         gt_bboxes = torch.cat(gt_bboxes, dim=0).type(torch.float32)
+        gt_bboxes_normed = gt_bboxes.clone()
         gt_bboxes_normed[:, 0:4:2] = gt_bboxes[:, 0:4:2] / float(img_shape[1])
         gt_bboxes_normed[:, 1:4:2] = gt_bboxes[:, 1:4:2] / float(img_shape[0])
         gt_bboxes_normed = gt_bboxes_normed.clamp(0., 1.)
@@ -269,7 +270,7 @@ class OSTrackHead(BaseModule):
         losses['loss_bbox'] = self.loss_bbox(pred_bboxes_normed, gt_bboxes_normed)
         
         # Add focal loss to gaussian heatmap
-        gt_bboxes_xywh = gt_bboxes.clone()
+        gt_bboxes_xywh = gt_bboxes_normed.clone()
         gt_bboxes_xywh[:, 2:] = gt_bboxes_xywh[:, 2:] - gt_bboxes_xywh[:, :2]
         
         gt_gaussian_map = generate_heatmap(gt_bboxes_xywh.unsqueeze(0), img_shape[0], self.bbox_head.stride)

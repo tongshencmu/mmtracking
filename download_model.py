@@ -7,7 +7,7 @@ model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-16', pretrai
 for name, param in model.named_parameters():
     print(name)
 
-path = 'vit-b-16-laion-2b.pth'
+path = '/workspace/vit-b-16-laion-2b.pth'
 torch.save(model.state_dict(), path)
 
 visual_model = {}
@@ -22,8 +22,8 @@ for name, param in model.named_parameters():
         print(name, param.shape)
         text_model[name] = param
         
-visual_path = 'vit-b-16-laion-2b_visual.pth'
+visual_path = '/workspace/vit-b-16-laion-2b_visual.pth'
 torch.save(visual_model, visual_path)
 
-text_path = 'vit-b-16-laion-2b_text.pth'
+text_path = '/workspace/vit-b-16-laion-2b_text.pth'
 torch.save(text_model, text_path)
